@@ -37,6 +37,40 @@ def cmd_data(_args: argparse.Namespace) -> None:
         print(data.win_rate_comparison(t).to_string())
 
 
+def cmd_stats(_args: argparse.Namespace) -> None:
+    """Step 3: naive vs dependence-aware tests of 'performance differs by regime'."""
+    import pandas as pd
+
+    from . import data
+    from . import stats_tests as st
+
+    ds = data.load_dataset()
+    fmt = {"display.width": 140, "display.max_columns": 20}
+
+    print("1) What the notebook did: every closing trade treated as independent")
+    for k, v in st.naive_trade_level_tests(ds.closes).items():
+        print(f"   {k:<28} {v:.4g}" if isinstance(v, float) else f"   {k:<28} {v}")
+
+    print("\n2) How much do i.i.d. standard errors understate uncertainty? (win rate)")
+    with pd.option_context(*sum(fmt.items(), ()), "display.float_format", "{:.4f}".format):
+        print(st.design_effect_table(ds.closes).to_string())
+
+    print("\n3) Regime estimates with 95% CIs from a day-cluster bootstrap")
+    with pd.option_context(*sum(fmt.items(), ()), "display.float_format", "{:.3f}".format):
+        print(st.regime_bootstrap_table(ds.closes).to_string())
+
+    print("\n4) Global test on daily net PnL per $ traded (one observation per day)")
+    for label in ("sentiment", "sentiment_lag1"):
+        res = st.global_tests(ds.market_day, label_col=label)
+        print(f"   [{label}]")
+        for k, v in res.items():
+            print(f"     {k:<24} {v:.4g}" if isinstance(v, float) else f"     {k:<24} {v}")
+
+    print("\n5) Pairwise regime comparisons on daily data, Holm-corrected")
+    with pd.option_context(*sum(fmt.items(), ()), "display.float_format", "{:.3f}".format):
+        print(st.pairwise_regime_tests(ds.market_day).to_string())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m sentiment_quant",
@@ -50,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_data = sub.add_parser("data", help="build the cleaned dataset and print a summary")
     p_data.set_defaults(func=cmd_data)
+
+    p_stats = sub.add_parser("stats", help="Step 3: dependence-aware hypothesis tests")
+    p_stats.set_defaults(func=cmd_stats)
 
     # Later steps add: `run` (full pipeline, Step 7).
     return parser
