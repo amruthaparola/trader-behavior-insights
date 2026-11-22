@@ -71,6 +71,32 @@ def cmd_stats(_args: argparse.Namespace) -> None:
         print(st.pairwise_regime_tests(ds.market_day).to_string())
 
 
+def cmd_risk(_args: argparse.Namespace) -> None:
+    """Step 4: risk-adjusted performance by regime and by trader."""
+    import pandas as pd
+
+    from . import data
+    from . import metrics as mt
+
+    ds = data.load_dataset()
+    opts = ("display.width", 160, "display.max_columns", 30)
+
+    reg = mt.regime_risk_table(ds.account_day, ds.closes, ds.sentiment)
+    daily_cols = ["n_days", "total_pnl", "sharpe", "sharpe_se", "psr_vs_0", "sortino",
+                  "max_drawdown", "var95", "cvar95", "skew", "excess_kurtosis"]
+    trade_cols = ["n_trades", "hit_rate", "avg_win", "avg_loss", "payoff_ratio",
+                  "breakeven_hit_rate", "profit_factor", "expectancy"]
+    with pd.option_context(*opts, "display.float_format", "{:,.2f}".format):
+        print("1) Book-level DAILY risk by same-day regime (USD; Sharpe annualised with sqrt(365))")
+        print(reg[daily_cols].to_string())
+        print("\n2) TRADE-level stats by regime (closing trades, net of closing fee, USD)")
+        print(reg[trade_cols].to_string())
+        print("\n3) Fee impact on the whole book")
+        print(mt.fee_impact(ds.account_day).to_string())
+        print("\n4) Trader leaderboard (sorted by Sharpe)")
+        print(mt.trader_leaderboard(ds.account_day, ds.closes).to_string())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m sentiment_quant",
@@ -87,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_stats = sub.add_parser("stats", help="Step 3: dependence-aware hypothesis tests")
     p_stats.set_defaults(func=cmd_stats)
+
+    p_risk = sub.add_parser("risk", help="Step 4: risk metrics by regime and by trader")
+    p_risk.set_defaults(func=cmd_risk)
 
     # Later steps add: `run` (full pipeline, Step 7).
     return parser
