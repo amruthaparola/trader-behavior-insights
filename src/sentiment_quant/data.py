@@ -140,8 +140,10 @@ def load_trades(path=config.TRADES_CSV) -> pd.DataFrame:
 # Join + panels
 # --------------------------------------------------------------------------- #
 def attach_sentiment(trades: pd.DataFrame, sentiment: pd.DataFrame) -> pd.DataFrame:
-    """Left-join same-day and lag-1 sentiment onto each trade by UTC date."""
-    sent = add_lagged_sentiment(sentiment, lag_days=1)
+    """Left-join same-day, lag-1 and lag-2 sentiment onto each trade by UTC date.
+
+    Lag 2 lets us describe the *change* known before day t: (t-2 -> t-1)."""
+    sent = add_lagged_sentiment(add_lagged_sentiment(sentiment, lag_days=1), lag_days=2)
     merged = trades.merge(sent, on="date", how="left", validate="many_to_one")
     missing = merged[SENTIMENT_LABEL_COL].isna().sum()
     if missing:

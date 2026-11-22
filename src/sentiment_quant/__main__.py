@@ -97,6 +97,43 @@ def cmd_risk(_args: argparse.Namespace) -> None:
         print(mt.trader_leaderboard(ds.account_day, ds.closes).to_string())
 
 
+def cmd_models(_args: argparse.Namespace) -> None:
+    """Step 5: predictive regressions with lagged sentiment."""
+    import pandas as pd
+
+    from . import data
+    from . import models as md
+
+    ds = data.load_dataset()
+    m = ds.market_day
+    opts = ("display.width", 160, "display.max_columns", 20, "display.float_format", "{:.3f}".format)
+
+    with pd.option_context(*opts):
+        for winsor in (True, False):
+            res = md.time_series_models(m, winsor=winsor)
+            tag = "winsorised 1/99%" if winsor else "raw"
+            print(f"1) Daily return (bps) on yesterday's sentiment / 10  [{tag}, HAC lags={res.attrs['hac_lags']}]")
+            print(res.to_string(), "\n")
+
+        reg = md.regime_dummy_model(m)
+        print("2) Yesterday's regime as dummies (baseline Neutral), HAC SEs")
+        print(reg.to_string())
+        print(f"   joint Wald test, all regime effects = 0:  p = {reg.attrs['joint_p']:.3f}\n")
+
+        print("3) Panel: account-day return on yesterday's sentiment / 10")
+        print(md.panel_models(ds.account_day).to_string(), "\n")
+
+        print("4a) Notebook-style transitions (yesterday -> today), with day counts")
+        tt = md.transition_table(m)
+        print(tt[tt["n_days"] > 0].to_string(), "\n")
+        print("4b) Predictive: did the regime worsen/improve from t-2 to t-1?  (baseline unchanged, HAC)")
+        print(md.change_direction_model(m).to_string(), "\n")
+
+    print("5) Out-of-sample: expanding-window forecast vs historical mean")
+    for k, v in md.out_of_sample_r2(m).items():
+        print(f"   {k:<22} {v:.4f}" if isinstance(v, float) else f"   {k:<22} {v}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m sentiment_quant",
@@ -116,6 +153,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_risk = sub.add_parser("risk", help="Step 4: risk metrics by regime and by trader")
     p_risk.set_defaults(func=cmd_risk)
+
+    p_models = sub.add_parser("models", help="Step 5: predictive regressions on lagged sentiment")
+    p_models.set_defaults(func=cmd_models)
 
     # Later steps add: `run` (full pipeline, Step 7).
     return parser
