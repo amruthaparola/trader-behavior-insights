@@ -134,6 +134,55 @@ def cmd_models(_args: argparse.Namespace) -> None:
         print(f"   {k:<22} {v:.4f}" if isinstance(v, float) else f"   {k:<22} {v}")
 
 
+def cmd_prices(_args: argparse.Namespace) -> None:
+    """Download daily BTC candles once (needed by the backtest)."""
+    from . import prices
+
+    df = prices.download_btc()
+    print(f"saved {len(df)} days ({df['date'].min():%Y-%m-%d} -> {df['date'].max():%Y-%m-%d}) "
+          f"from {df['source'].iloc[0]} to {prices.BTC_CSV}")
+
+
+def cmd_backtest(_args: argparse.Namespace) -> None:
+    """Step 6: sentiment strategies on BTC with costs and an out-of-sample split."""
+    import pandas as pd
+
+    from . import backtest as bt
+
+    d = bt.load_frame()
+    opts = ("display.width", 160, "display.max_columns", 20, "display.float_format", "{:.3f}".format)
+    print(f"BTC daily {d['date'].min():%Y-%m-%d} -> {d['date'].max():%Y-%m-%d}; "
+          f"out-of-sample from {bt.TEST_START:%Y-%m-%d}; costs {bt.COST_BPS:.0f} bps per unit turnover\n")
+
+    with pd.option_context(*opts):
+        print("1) Rule performance (Sharpe annualised sqrt(365); max_dd and cagr as fractions)")
+        print(bt.evaluate_rules(d).to_string(), "\n")
+
+        print("2) Out-of-sample Sharpe vs transaction cost")
+        print(bt.cost_sensitivity(d).to_string(), "\n")
+
+        ts = bt.threshold_search(d)
+        print("3) Tuning 'long when score_{t-1} < k' on in-sample data only")
+        print(ts.to_string())
+        k = ts.attrs["best_k_in_sample"]
+        print(f"   best k in-sample = {k}  ->  OOS Sharpe {ts.loc[k, 'oos_sharpe']:.3f}")
+        print(f"   Spearman rank corr(IS Sharpe, OOS Sharpe) across k = {ts.attrs['rank_corr_is_oos']:.3f}\n")
+
+    print("4) Timing test: rule vs the same positions rotated in time (circular shift)")
+    oos = d["date"] >= bt.TEST_START
+    for name, rule in bt.RULES.items():
+        if name == "Buy & hold":
+            continue
+        pos = rule(d)
+        full = bt.timing_test(pos, d["ret"])
+        test = bt.timing_test(pos[oos.to_numpy()], d.loc[oos, "ret"])
+        print(f"   {name:<26} full: SR {full['sharpe']:.2f} vs null {full['null_mean']:.2f}, p={full['p']:.3f}"
+              f"   | OOS: SR {test['sharpe']:.2f} vs null {test['null_mean']:.2f}, p={test['p']:.3f}")
+
+    path = bt.plot_equity(d)
+    print(f"\nFigure saved: {path}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m sentiment_quant",
@@ -156,6 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_models = sub.add_parser("models", help="Step 5: predictive regressions on lagged sentiment")
     p_models.set_defaults(func=cmd_models)
+
+    p_prices = sub.add_parser("prices", help="download daily BTC candles (once)")
+    p_prices.set_defaults(func=cmd_prices)
+
+    p_bt = sub.add_parser("backtest", help="Step 6: sentiment-signal backtest on BTC")
+    p_bt.set_defaults(func=cmd_backtest)
 
     # Later steps add: `run` (full pipeline, Step 7).
     return parser
